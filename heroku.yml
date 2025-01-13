@@ -2,4 +2,4 @@ build:
   docker:
     web: Dockerfile
 run:
-  web: streamlit run src/ant_ai/Get_Started.py 
+  web: streamlit run src/ant_ai/Get_Started.py --server.port=$PORT --server.address=0.0.0.0 

@@ -38,10 +38,5 @@ enableCORS = false\n\
 enableXsrfProtection = false\n\
 " > /root/.streamlit/config.toml
 
-# Default port for Heroku
-ENV PORT=8501
-ENV STREAMLIT_SERVER_PORT=$PORT
-ENV STREAMLIT_SERVER_ADDRESS="0.0.0.0"
-
 # Run the Streamlit application
-CMD streamlit run src/ant_ai/Get_Started.py
+CMD streamlit run src/ant_ai/Get_Started.py --server.port=$PORT --server.address=0.0.0.0
