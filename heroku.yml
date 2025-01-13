@@ -1,0 +1,5 @@
+build:
+  docker:
+    web: Dockerfile
+run:
+  web: streamlit run src/ant_ai/Get_Started.py 
