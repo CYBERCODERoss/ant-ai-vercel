@@ -37,7 +37,7 @@ classifiers = [
     'Development Status :: 3 - Alpha',
     'License :: OSI Approved :: Apache-2.0 License',
     'Operating System :: OS Independent',
-    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
     'Programming Language :: Python :: Implementation :: CPython',
     'Programming Language :: Python :: Implementation :: PyPy',
     'Typing :: Typed',
@@ -45,10 +45,15 @@ classifiers = [
 
 
 [tool.poetry.dependencies]
-python = "^3.11"
-pytest = ">=8.0.0"
+python = ">=3.11,<=3.13"
+pytest = ">=8.0.0"  # Upgraded to 8.0.0 or higher to match necessary constraints
 crewai = "0.79.4"
-streamlit = "^1.29.0"
+langchain-ollama = "0.2.0"
+ipykernel = "6.29.5"
+jupyter = "^1.1.1"
+pre-commit = "*"  # Use the latest version available
+openai = "^1.55.1"
+streamlit = "^1.41.1"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -187,5 +192,3 @@ max-statements = 80
 
 [tool.ruff.flake8-tidy-imports]
 ban-relative-imports = 'all'
-
-
