@@ -22,10 +22,14 @@ jobs:
       - name: Build Docker image with Docker Compose
         run: |
           docker compose build --no-cache
+          docker images
 
       - name: Save Docker image
         run: |
-          docker save -o ant-ai.tar ant-ai-ant_ai
+          # Get the actual image name from docker-compose
+          IMAGE_NAME=$(docker compose config | grep 'image:' | awk '{print $2}')
+          echo "Saving image: $IMAGE_NAME"
+          docker save -o ant-ai.tar $IMAGE_NAME
 
       - name: Copy files to EC2
         run: |
@@ -47,7 +51,12 @@ jobs:
 
             # Stop and remove existing containers
             docker compose down || true
-            docker rmi ant-ai-ant_ai:latest || true
+            
+            # Get the image name from docker-compose
+            IMAGE_NAME=$(docker compose config | grep 'image:' | awk '{print $2}')
+            
+            # Remove existing image if it exists
+            docker rmi $IMAGE_NAME || true
 
             # Load new image and start containers
             docker load -i ant-ai.tar
@@ -60,4 +69,5 @@ jobs:
       - name: Cleanup local files
         run: |
           rm -f ssh-key.pem .env ant-ai.tar
-          docker rmi ant-ai-ant_ai:latest || true 
+          docker compose down
+          docker rmi $(docker images -q) || true 
