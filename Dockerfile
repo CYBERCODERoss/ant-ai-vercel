@@ -1,42 +1,81 @@
-# Use the latest version of the official Python image with a slim variant
-FROM python:3.11-slim
+# Build stage
+FROM python:3.11.7-slim AS builder
 
-# Set an environment variable to prevent Python from writing .pyc files to disk and to buffer stdout and stderr
-ENV PYTHONDONTWRITEBYTECODE=1 
-ENV PYTHONUNBUFFERED=1
+# Set build environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    POETRY_VERSION=1.7.1 \
+    POETRY_HOME="/opt/poetry" \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_NO_INTERACTION=1 \
+    PATH="/opt/poetry/bin:$PATH" \
+    PIP_DEFAULT_TIMEOUT=100 \
+    PIP_RETRIES=3
 
-# Set the working directory
-WORKDIR /app
-
-# Install system dependencies for running the application
-RUN apt-get update && apt-get install -y \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
-RUN curl -sSL https://install.python-poetry.org | python3 -
+# Install Poetry with retry logic
+RUN for i in 1 2 3; do \
+    curl -sSL https://install.python-poetry.org | POETRY_HOME=/opt/poetry python3 - && break || sleep 10; \
+    done && \
+    chmod +x /opt/poetry/bin/poetry
 
-# Add Poetry to PATH
-ENV PATH="/root/.local/bin:$PATH"
+# Set working directory
+WORKDIR /app
 
-# Copy the entire project to the working directory
-COPY . /app
+# Copy only dependency files
+COPY pyproject.toml poetry.lock ./
 
-# Install Python dependencies using Poetry
-RUN poetry config virtualenvs.create false \
-    && poetry install --without dev
+# Configure Poetry for better network handling
+RUN poetry config installer.max-workers 4 && \
+    poetry config installer.parallel false
 
-# Create necessary directories
-RUN mkdir -p logs notebooks
+# Install runtime dependencies only with retry logic
+RUN for i in 1 2 3; do \
+    poetry install --only main --no-interaction --no-ansi --no-root && break || sleep 10; \
+    done
 
-# Configure Streamlit
-RUN mkdir -p /root/.streamlit
-RUN echo "\
+# Final stage
+FROM python:3.11.7-slim
+
+# Set runtime environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    STREAMLIT_SERVER_PORT=8501 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0
+
+WORKDIR /app
+
+# Install only required runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
+
+# Copy only necessary application files
+COPY src/ant_ai ./src/ant_ai
+COPY definitions ./definitions
+
+# Create required directories and configure Streamlit
+RUN mkdir -p logs notebooks /root/.streamlit && \
+    echo '\
 [server]\n\
 enableCORS = false\n\
 enableXsrfProtection = false\n\
-" > /root/.streamlit/config.toml
+' > /root/.streamlit/config.toml
 
-# Run the Streamlit application
-CMD streamlit run src/ant_ai/Get_Started.py --server.port=$PORT --server.address=0.0.0.0
+# Expose Streamlit port
+EXPOSE 8501
+
+# Run the application
+CMD ["streamlit", "run", "src/ant_ai/Get_Started.py"]
