@@ -21,7 +21,7 @@ jobs:
 
       - name: Build Docker image with Docker Compose
         run: |
-          docker-compose build --no-cache
+          docker compose build --no-cache
           docker images
 
       - name: Save and compress Docker image
