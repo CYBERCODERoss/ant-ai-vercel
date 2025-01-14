@@ -31,11 +31,11 @@ jobs:
       - name: Build and save Docker image
         run: |
           # Build with service name
-          docker-compose build ant_ai
+          docker-compose build
           # List images to verify
           docker images
           # Save the image with correct name
-          docker save $(docker-compose images -q ant_ai) | gzip > image.tar.gz
+          docker save ant-ai-vercel_ant_ai:latest | gzip > image.tar.gz
 
       - name: Deploy to EC2
         env:
