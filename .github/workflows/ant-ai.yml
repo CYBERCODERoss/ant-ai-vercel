@@ -11,8 +11,8 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4      
-    
+        uses: actions/checkout@v4
+
       - name: Set up Docker
         uses: docker/setup-buildx-action@v2
 
@@ -22,12 +22,20 @@ jobs:
           sudo chmod +x /usr/local/bin/docker-compose
           docker-compose --version
 
-
+      - name: Set up Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+          docker-compose --version
 
       - name: Build and save Docker image
         run: |
-          docker-compose build
-          docker save ant_ai:latest | gzip > image.tar.gz
+          # Build with service name
+          docker-compose build ant_ai
+          # List images to verify
+          docker images
+          # Save the image with correct name
+          docker save $(docker-compose images -q ant_ai) | gzip > image.tar.gz
 
       - name: Deploy to EC2
         env:
@@ -42,6 +50,9 @@ jobs:
           # Save env file
           echo "$ENV_FILE" > .env
           
+          # Create directory on EC2
+          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@$EC2_HOST "mkdir -p /home/ubuntu/ant-ai"
+          
           # Copy files to EC2
           scp -i ssh-key.pem -o StrictHostKeyChecking=no \
             image.tar.gz \
@@ -52,9 +63,10 @@ jobs:
           # Deploy on EC2
           ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@$EC2_HOST << 'EOF'
             cd /home/ubuntu/ant-ai
-            docker-compose down
+            docker-compose down || true
             docker load < image.tar.gz
             docker-compose up -d
+            docker-compose ps
           EOF
 
       - name: Cleanup
