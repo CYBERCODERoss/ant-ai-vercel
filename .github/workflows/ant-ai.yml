@@ -26,10 +26,10 @@ jobs:
 
       - name: Save Docker image
         run: |
-          # Get the actual image name from docker-compose
-          IMAGE_NAME=$(docker compose config | grep 'image:' | awk '{print $2}')
+          # The image name is derived from the directory and service name
+          IMAGE_NAME="ant-ai-vercel-ant_ai"
           echo "Saving image: $IMAGE_NAME"
-          docker save -o ant-ai.tar $IMAGE_NAME
+          docker save -o ant-ai.tar $IMAGE_NAME:latest
 
       - name: Copy files to EC2
         run: |
@@ -52,11 +52,8 @@ jobs:
             # Stop and remove existing containers
             docker compose down || true
             
-            # Get the image name from docker-compose
-            IMAGE_NAME=$(docker compose config | grep 'image:' | awk '{print $2}')
-            
             # Remove existing image if it exists
-            docker rmi $IMAGE_NAME || true
+            docker rmi ant-ai-vercel-ant_ai:latest || true
 
             # Load new image and start containers
             docker load -i ant-ai.tar
@@ -70,4 +67,4 @@ jobs:
         run: |
           rm -f ssh-key.pem .env ant-ai.tar
           docker compose down
-          docker rmi $(docker images -q) || true 
+          docker rmi ant-ai-vercel-ant_ai:latest || true 
