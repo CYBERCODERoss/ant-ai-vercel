@@ -1,210 +1,51 @@
-name: Deploy to AWS EC2
+name: Deploy to EC2
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-22.04
-
+  deploy:
+    runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Verify repository contents
+      - name: Build and save Docker image
         run: |
-          echo "Current directory contents:"
-          ls -la
-          echo "Checking for Dockerfile:"
-          if [ -f "Dockerfile" ]; then
-            echo "Dockerfile exists"
-            cat Dockerfile
-          else
-            echo "Dockerfile not found!"
-            exit 1
-          fi
-          echo "Checking for docker-compose.yml:"
-          if [ -f "docker-compose.yml" ]; then
-            echo "docker-compose.yml exists"
-            cat docker-compose.yml
-          else
-            echo "docker-compose.yml not found!"
-            exit 1
-          fi
+          docker-compose build
+          docker save ant_ai:latest | gzip > image.tar.gz
 
-      - name: Install required packages
+      - name: Deploy to EC2
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_KEY }}
+          EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
+          ENV_FILE: ${{ secrets.ENV_PROD }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose pigz rsync
-          docker-compose --version
-          docker version
-          docker info
-
-      - name: Set up environment variables
-        run: |
-          echo -e "${{ secrets.ENV_PROD }}" >> .env
-          echo "IMAGE_NAME=ant-ai-vercel-ant_ai" >> .env
-          echo "CONTAINER_NAME=ant-ai" >> .env
-          echo "Environment file contents (excluding secrets):"
-          grep -v "SECRET\|KEY\|PASSWORD" .env || true
-
-      - name: Debug Docker Compose config
-        run: |
-          echo "Docker Compose Version:"
-          docker-compose version
-          echo "Docker Compose Configuration:"
-          docker-compose config
-          echo "Docker Compose File Contents:"
-          cat docker-compose.yml
-
-      - name: Build Docker image
-        run: |
-          echo "Building Docker image..."
-          # First try with BuildKit disabled
-          COMPOSE_DOCKER_CLI_BUILD=0 DOCKER_BUILDKIT=0 docker-compose build --no-cache
-          echo "Image details:"
-          docker images
-          # Tag the image explicitly
-          docker tag ant_ai:latest ant-ai-vercel-ant_ai:latest || true
-          echo "After tagging:"
-          docker images
-
-      - name: Save and compress Docker image
-        run: |
-          echo "Available Docker images:"
-          docker images
-          
-          # Try to find the image with different possible names
-          for IMG_NAME in "ant-ai-vercel-ant_ai" "ant_ai" "ant-ai"; do
-            echo "Checking for image: $IMG_NAME:latest"
-            IMAGE_ID=$(docker images $IMG_NAME:latest -q)
-            if [ ! -z "$IMAGE_ID" ]; then
-              echo "Found image $IMG_NAME:latest with ID $IMAGE_ID"
-              echo "Saving and compressing image..."
-              docker save $IMG_NAME:latest | pigz -9 > ant-ai.tar.gz
-              echo "Compressed image size:"
-              ls -lh ant-ai.tar.gz
-              exit 0
-            fi
-          done
-          
-          echo "Error: No matching image found!"
-          docker images
-          exit 1
-
-      - name: Setup SSH and directory on EC2
-        run: |
-          # Setup SSH key
-          echo "${{ secrets.AWS_SSH_KEY }}" > ssh-key.pem
+          # Save SSH key
+          echo "$SSH_PRIVATE_KEY" > ssh-key.pem
           chmod 400 ssh-key.pem
-
-          # Prepare EC2 instance
-          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} '
-            # Create and set permissions for app directory
-            sudo mkdir -p /home/ubuntu/ant-ai
-            sudo chown -R ubuntu:ubuntu /home/ubuntu/ant-ai
-            
-            # Install required packages if not present
-            if ! command -v pigz &> /dev/null || ! command -v docker-compose &> /dev/null; then
-              sudo apt-get update
-              sudo apt-get install -y pigz docker-compose
-            fi
-
-            # Clean up old files
-            rm -rf /home/ubuntu/ant-ai/*
-
-            # Verify Docker installation
-            docker version
-            docker-compose version
-          '
-
-      - name: Transfer files to EC2
-        run: |
-          echo "Transferring files to EC2..."
-          # First, verify files exist locally
-          ls -la Dockerfile docker-compose.yml .env ant-ai.tar.gz
           
-          # Transfer files with verification
-          for file in Dockerfile docker-compose.yml .env ant-ai.tar.gz; do
-            echo "Transferring $file..."
-            rsync -avz --progress -e "ssh -i ssh-key.pem -o StrictHostKeyChecking=no" \
-              "$file" \
-              ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/
-            
-            # Verify transfer
-            ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} \
-              "ls -l /home/ubuntu/ant-ai/$file"
-          done
-
-      - name: Deploy application
-        run: |
-          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} << 'EOF'
+          # Save env file
+          echo "$ENV_FILE" > .env
+          
+          # Copy files to EC2
+          scp -i ssh-key.pem -o StrictHostKeyChecking=no \
+            image.tar.gz \
+            docker-compose.yml \
+            .env \
+            ubuntu@$EC2_HOST:/home/ubuntu/ant-ai/
+          
+          # Deploy on EC2
+          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@$EC2_HOST << 'EOF'
             cd /home/ubuntu/ant-ai
-
-            # Verify files exist
-            echo "Checking transferred files..."
-            ls -la
-
-            # Setup Docker permissions
-            sudo usermod -aG docker ubuntu
-            sudo chmod 666 /var/run/docker.sock
-
-            echo "Docker Compose configuration:"
-            docker-compose config
-
-            echo "Stopping existing containers..."
-            sudo docker-compose down --remove-orphans || true
-            
-            echo "Cleaning up old images..."
-            sudo docker system prune -af
-            sudo docker rmi ant-ai-vercel-ant_ai:latest || true
-
-            echo "Loading new image..."
-            pigz -dc ant-ai.tar.gz | sudo docker load
-            
-            echo "Starting application in detached mode..."
-            COMPOSE_DOCKER_CLI_BUILD=0 DOCKER_BUILDKIT=0 sudo -E docker-compose up -d
-
-            echo "Waiting for application to start..."
-            for i in {1..30}; do
-              if curl -s http://localhost:8501 > /dev/null; then
-                echo "Application is up!"
-                break
-              fi
-              echo "Waiting... ($i/30)"
-              sleep 10
-            done
-
-            echo "Container status:"
-            sudo docker-compose ps
-
-            echo "Container logs:"
-            sudo docker-compose logs
-
-            echo "Cleaning up..."
-            rm -f ant-ai.tar.gz
+            docker-compose down
+            docker load < image.tar.gz
+            docker-compose up -d
           EOF
-
-      - name: Verify deployment
-        run: |
-          echo "Checking application status..."
-          for i in {1..5}; do
-            if curl -sSf http://${{ secrets.AWS_EC2_HOST }}:8501; then
-              echo "Application is responding!"
-              exit 0
-            fi
-            echo "Retry $i/5..."
-            sleep 10
-          done
-          echo "Application not responding on port 8501"
-          exit 1
 
       - name: Cleanup
         if: always()
-        run: |
-          echo "Cleaning up local resources..."
-          rm -f ssh-key.pem .env ant-ai.tar.gz
-          docker-compose down --remove-orphans
-          docker system prune -af 
+        run: rm -f ssh-key.pem .env image.tar.gz 
