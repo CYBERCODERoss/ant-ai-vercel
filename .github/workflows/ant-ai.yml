@@ -76,17 +76,17 @@ jobs:
             sudo gunzip -c ant-ai.tar.gz | sudo docker load
             
             echo "Starting containers..."
-            sudo docker-compose up -d
+            sudo docker compose up -d
 
             echo "Cleaning up..."
             rm -f ant-ai.tar.gz
             
             echo "Deployment complete! Container logs:"
-            sudo docker-compose logs
+            sudo docker compose logs
           EOF
 
       - name: Cleanup local files
         run: |
           rm -f ssh-key.pem .env ant-ai.tar.gz
-          docker-compose down
+          docker compose down
           docker rmi ant-ai-vercel-ant_ai:latest || true 
