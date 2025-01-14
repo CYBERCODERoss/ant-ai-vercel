@@ -66,19 +66,33 @@ jobs:
           COMPOSE_DOCKER_CLI_BUILD=0 DOCKER_BUILDKIT=0 docker-compose build --no-cache
           echo "Image details:"
           docker images
+          # Tag the image explicitly
+          docker tag ant_ai:latest ant-ai-vercel-ant_ai:latest || true
+          echo "After tagging:"
+          docker images
 
       - name: Save and compress Docker image
         run: |
-          echo "Saving and compressing image..."
-          IMAGE_ID=$(docker images ant-ai-vercel-ant_ai:latest -q)
-          if [ -z "$IMAGE_ID" ]; then
-            echo "Error: Image not found!"
-            docker images
-            exit 1
-          fi
-          docker save ant-ai-vercel-ant_ai:latest | pigz -9 > ant-ai.tar.gz
-          echo "Compressed image size:"
-          ls -lh ant-ai.tar.gz
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to find the image with different possible names
+          for IMG_NAME in "ant-ai-vercel-ant_ai" "ant_ai" "ant-ai"; do
+            echo "Checking for image: $IMG_NAME:latest"
+            IMAGE_ID=$(docker images $IMG_NAME:latest -q)
+            if [ ! -z "$IMAGE_ID" ]; then
+              echo "Found image $IMG_NAME:latest with ID $IMAGE_ID"
+              echo "Saving and compressing image..."
+              docker save $IMG_NAME:latest | pigz -9 > ant-ai.tar.gz
+              echo "Compressed image size:"
+              ls -lh ant-ai.tar.gz
+              exit 0
+            fi
+          done
+          
+          echo "Error: No matching image found!"
+          docker images
+          exit 1
 
       - name: Setup SSH and directory on EC2
         run: |
