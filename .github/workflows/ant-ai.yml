@@ -1,0 +1,63 @@
+name: Deploy to AWS EC2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up environment variables
+        run: |
+          echo -e "${{ secrets.ENV_PROD }}" >> .env
+          echo "IMAGE_NAME=ant-ai" >> .env
+          echo "CONTAINER_NAME=ant-ai" >> .env
+
+      - name: Build Docker image with Docker Compose
+        run: |
+          docker compose build --no-cache
+
+      - name: Save Docker image
+        run: |
+          docker save -o ant-ai.tar ant-ai-ant_ai
+
+      - name: Copy files to EC2
+        run: |
+          echo "${{ secrets.AWS_SSH_KEY }}" >> ssh-key.pem
+          sudo chmod 400 ssh-key.pem
+
+          # Create target directory on EC2
+          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} 'mkdir -p /home/ubuntu/ant-ai'
+
+          # Copy necessary files to EC2
+          scp -i ssh-key.pem -o StrictHostKeyChecking=no .env ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/.env
+          scp -i ssh-key.pem -o StrictHostKeyChecking=no ant-ai.tar ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/ant-ai.tar
+          scp -i ssh-key.pem -o StrictHostKeyChecking=no docker-compose.yml ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/docker-compose.yml
+
+      - name: Deploy to EC2
+        run: |
+          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} << 'EOF'
+            cd /home/ubuntu/ant-ai
+
+            # Stop and remove existing containers
+            docker compose down || true
+            docker rmi ant-ai-ant_ai:latest || true
+
+            # Load new image and start containers
+            docker load -i ant-ai.tar
+            docker compose up -d
+
+            # Clean up
+            rm -f ant-ai.tar
+          EOF
+
+      - name: Cleanup local files
+        run: |
+          rm -f ssh-key.pem .env ant-ai.tar
+          docker rmi ant-ai-ant_ai:latest || true 
