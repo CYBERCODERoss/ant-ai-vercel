@@ -39,7 +39,8 @@ jobs:
 
           # Create target directory and ensure it's empty
           ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} '
-            mkdir -p /home/ubuntu/ant-ai
+            sudo mkdir -p /home/ubuntu/ant-ai
+            sudo chown -R ubuntu:ubuntu /home/ubuntu/ant-ai
             rm -f /home/ubuntu/ant-ai/ant-ai.tar.gz
           '
 
@@ -58,23 +59,30 @@ jobs:
           ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} << 'EOF'
             cd /home/ubuntu/ant-ai
 
+            # Add user to docker group if not already added
+            sudo usermod -aG docker ubuntu
+            
+            # Set permissions
+            sudo chown -R ubuntu:ubuntu /home/ubuntu/ant-ai
+            sudo chmod 666 /var/run/docker.sock
+
             echo "Stopping existing containers..."
-            docker compose down || true
+            sudo docker compose down || true
             
             echo "Removing old image..."
-            docker rmi ant-ai-vercel-ant_ai:latest || true
+            sudo docker rmi ant-ai-vercel-ant_ai:latest || true
 
             echo "Loading new image..."
-            gunzip -c ant-ai.tar.gz | docker load
+            sudo gunzip -c ant-ai.tar.gz | sudo docker load
             
             echo "Starting containers..."
-            docker compose up -d
+            sudo docker compose up -d
 
             echo "Cleaning up..."
             rm -f ant-ai.tar.gz
             
             echo "Deployment complete! Container logs:"
-            docker compose logs
+            sudo docker compose logs
           EOF
 
       - name: Cleanup local files
