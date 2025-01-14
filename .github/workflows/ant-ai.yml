@@ -24,47 +24,61 @@ jobs:
           docker compose build --no-cache
           docker images
 
-      - name: Save Docker image
+      - name: Save and compress Docker image
         run: |
-          # The image name is derived from the directory and service name
           IMAGE_NAME="ant-ai-vercel-ant_ai"
           echo "Saving image: $IMAGE_NAME"
-          docker save -o ant-ai.tar $IMAGE_NAME:latest
+          docker save $IMAGE_NAME:latest | gzip > ant-ai.tar.gz
+          echo "Image size after compression:"
+          ls -lh ant-ai.tar.gz
 
       - name: Copy files to EC2
         run: |
           echo "${{ secrets.AWS_SSH_KEY }}" >> ssh-key.pem
           sudo chmod 400 ssh-key.pem
 
-          # Create target directory on EC2
-          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} 'mkdir -p /home/ubuntu/ant-ai'
+          # Create target directory and ensure it's empty
+          ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} '
+            mkdir -p /home/ubuntu/ant-ai
+            rm -f /home/ubuntu/ant-ai/ant-ai.tar.gz
+          '
 
-          # Copy necessary files to EC2
+          # Copy files with progress indicator
+          echo "Copying environment file..."
           scp -i ssh-key.pem -o StrictHostKeyChecking=no .env ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/.env
-          scp -i ssh-key.pem -o StrictHostKeyChecking=no ant-ai.tar ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/ant-ai.tar
+          
+          echo "Copying docker-compose file..."
           scp -i ssh-key.pem -o StrictHostKeyChecking=no docker-compose.yml ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/docker-compose.yml
+          
+          echo "Copying Docker image (this may take a few minutes)..."
+          rsync --progress -e "ssh -i ssh-key.pem -o StrictHostKeyChecking=no" ant-ai.tar.gz ubuntu@${{ secrets.AWS_EC2_HOST }}:/home/ubuntu/ant-ai/
 
       - name: Deploy to EC2
         run: |
           ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} << 'EOF'
             cd /home/ubuntu/ant-ai
 
-            # Stop and remove existing containers
+            echo "Stopping existing containers..."
             docker compose down || true
             
-            # Remove existing image if it exists
+            echo "Removing old image..."
             docker rmi ant-ai-vercel-ant_ai:latest || true
 
-            # Load new image and start containers
-            docker load -i ant-ai.tar
+            echo "Loading new image..."
+            gunzip -c ant-ai.tar.gz | docker load
+            
+            echo "Starting containers..."
             docker compose up -d
 
-            # Clean up
-            rm -f ant-ai.tar
+            echo "Cleaning up..."
+            rm -f ant-ai.tar.gz
+            
+            echo "Deployment complete! Container logs:"
+            docker compose logs
           EOF
 
       - name: Cleanup local files
         run: |
-          rm -f ssh-key.pem .env ant-ai.tar
+          rm -f ssh-key.pem .env ant-ai.tar.gz
           docker compose down
           docker rmi ant-ai-vercel-ant_ai:latest || true 
