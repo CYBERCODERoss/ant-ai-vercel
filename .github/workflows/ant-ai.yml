@@ -12,30 +12,38 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Docker
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-
+        with:
+          buildkitd-flags: --debug
+  
       - name: Install Docker Compose
         run: |
-          sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
-
-      - name: Set up Docker Compose
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose
-          docker-compose --version
+            sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+            docker-compose --version
 
       - name: Build and save Docker image
         run: |
-          # Build with service name
-          docker-compose build
-          # List images to verify
+          # Verify project structure
+          echo "Project structure:"
+          ls -R
+          
+          # Build image with debug output
+          DOCKER_BUILDKIT=1 docker-compose build --no-cache --progress=plain
+          
+          # List images
+          echo "Available images:"
           docker images
-          # Save the image with correct name
+          
+          # Save the image
           docker save ant-ai-vercel_ant_ai:latest | gzip > image.tar.gz
+          
+          # Verify image size
+          ls -lh image.tar.gz
 
       - name: Deploy to EC2
         env:
