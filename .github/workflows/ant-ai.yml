@@ -19,9 +19,12 @@ jobs:
           echo "IMAGE_NAME=ant-ai" >> .env
           echo "CONTAINER_NAME=ant-ai" >> .env
 
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
       - name: Build Docker image with Docker Compose
         run: |
-          docker compose build --no-cache
+          docker-compose build --no-cache
           docker images
 
       - name: Save and compress Docker image
@@ -35,7 +38,7 @@ jobs:
       - name: Copy files to EC2
         run: |
           echo "${{ secrets.AWS_SSH_KEY }}" >> ssh-key.pem
-          sudo chmod 400 ssh-key.pem
+          chmod 400 ssh-key.pem
 
           # Create target directory and ensure it's empty
           ssh -i ssh-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} '
@@ -76,17 +79,17 @@ jobs:
             sudo gunzip -c ant-ai.tar.gz | sudo docker load
             
             echo "Starting containers..."
-            sudo docker compose up
+            sudo docker-compose up -d
 
             echo "Cleaning up..."
             rm -f ant-ai.tar.gz
             
             echo "Deployment complete! Container logs:"
-            sudo docker compose logs
+            sudo docker-compose logs
           EOF
 
       - name: Cleanup local files
         run: |
           rm -f ssh-key.pem .env ant-ai.tar.gz
-          docker compose down
+          docker-compose down
           docker rmi ant-ai-vercel-ant_ai:latest || true 
