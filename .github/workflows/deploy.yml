@@ -35,12 +35,14 @@ jobs:
       - name: Clean up unused Docker resources
         run: docker system prune -af
 
-      - name: Build Docker image with Docker Compose
+      - name: Build Docker image
         run: |
-          docker compose build
+          docker build -t ${{ env.IMAGE_NAME }}:latest .
 
       - name: Save Docker image
-        run: docker save ${{ env.IMAGE_NAME }} | gzip > ${{ env.IMAGE_NAME }}.tar.gz
+        run: |
+          docker images
+          docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
 
       - name: Setup SSH
         run: |
@@ -67,6 +69,17 @@ jobs:
           
           # Load and deploy new image
           gunzip -c ${{ env.IMAGE_NAME }}.tar.gz | docker load
+          
+          # Create or update docker-compose.yml with correct image name
+          cat > docker-compose.yml << EOL
+          version: '3'
+          services:
+            ant-ai:
+              image: ${{ env.IMAGE_NAME }}:latest
+              ports:
+                - "8501:8501"
+              restart: always
+          EOL
           
           # Deploy with rollback on failure
           if ! docker compose up -d; then
