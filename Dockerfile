@@ -29,8 +29,8 @@ RUN for i in 1 2 3; do \
 # Set working directory
 WORKDIR /app
 
-# Copy only dependency files
-COPY pyproject.toml poetry.lock ./
+# Copy the entire project for context
+COPY . .
 
 # Configure Poetry for better network handling
 RUN poetry config installer.max-workers 4 && \
@@ -62,9 +62,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
-# Copy only necessary application files
-COPY src/ant_ai ./src/ant_ai
-COPY definitions ./definitions
+# Copy application files from builder
+COPY --from=builder /app/src/ant_ai /app/src/ant_ai
+COPY --from=builder /app/definitions /app/definitions
 
 # Create required directories and configure Streamlit
 RUN mkdir -p logs notebooks /root/.streamlit && \
