@@ -3,7 +3,7 @@ name: build-deploy-ant-ai-prod
 env:
   IMAGE_NAME: ant-ai
   CONTAINER_NAME: ant-ai
-  REMOTE_DIR: /ant-ai
+  REMOTE_DIR: ~/ant-ai
 
 on:
   workflow_dispatch:
