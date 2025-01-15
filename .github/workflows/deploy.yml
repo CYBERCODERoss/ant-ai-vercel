@@ -10,31 +10,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Install SSH key
-      uses: shimataro/ssh-key-action@v2
-      with:
-        key: ${{ secrets.AWS_SSH_KEY }}
-        known_hosts: ${{ secrets.AWS_EC2_HOST }}
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.AWS_SSH_KEY }}
 
-    - name: Check Docker and Docker Compose
-      run: |
-        ssh -o StrictHostKeyChecking=no -i ${{ secrets.AWS_SSH_KEY }} ubuntu@${{ secrets.AWS_EC2_HOST }} '
-          if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
-            echo "Docker or Docker Compose is not installed." >&2
-            exit 1
-          fi
-        '
+      - name: Check Docker and Docker Compose
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} '
+            if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
+              echo "Docker or Docker Compose is not installed." >&2
+              exit 1
+            fi
+          '
 
-    - name: Clone Repo and Deploy
-      run: |
-        ssh -o StrictHostKeyChecking=no -i ${{ secrets.AWS_SSH_KEY }} ubuntu@${{ secrets.AWS_EC2_HOST }} '
-          REPO_DIR=/home/ubuntu/ant-ai
-          git clone https://github.com/CYBERCODERoss/ant-ai-vercel.git $REPO_DIR || (cd $REPO_DIR && git pull)
-          cd $REPO_DIR
-          echo "${{ secrets.ENV_PROD }}" > .env
-          docker-compose build --no-cache
-          docker-compose up -d
-        '
+      - name: Clone Repo and Deploy
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} '
+            REPO_DIR=/home/ubuntu/ant-ai
+            if [ ! -d "$REPO_DIR" ]; then
+              git clone https://github.com/CYBERCODERoss/ant-ai-vercel.git $REPO_DIR
+            else
+              cd $REPO_DIR && git pull
+            fi
+            cd $REPO_DIR
+            echo "${{ secrets.ENV_PROD }}" > .env
+            docker-compose build --no-cache
+            docker-compose up -d
+          '
