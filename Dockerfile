@@ -1,23 +1,34 @@
-# Use an official Python runtime as a parent image
+# Use the latest version of the official Python image with a slim variant
 FROM python:3.11-slim
 
-# Set the working directory in the container
+# Set an environment variable to prevent Python from writing .pyc files to disk and to buffer stdout and stderr
+ENV PYTHONDONTWRITEBYTECODE=1 
+ENV PYTHONUNBUFFERED=1
+
+# Set the working directory
 WORKDIR /app
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+# Install system dependencies for running the application
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install poetry
+RUN curl -sSL https://install.python-poetry.org | python3 -
 
-# Configure poetry to create the virtual environment in the project directory
-RUN poetry config virtualenvs.in-project true
+# Add Poetry to PATH
+ENV PATH="/root/.local/bin:$PATH"
 
-# Install dependencies
-RUN poetry install
+# Copy the entire project to the working directory
+COPY . /app
 
-# Make port 8501 available for Streamlit
+# Install Python dependencies using Poetry
+RUN poetry config virtualenvs.create false \
+    && poetry install --without dev
+
+# Expose the Streamlit default port
 EXPOSE 8501
 
-# Run the Streamlit server using poetry run
-CMD ["poetry", "run", "streamlit", "run", "./src/ant_ai/Get_Started.py"]
+# Run the Streamlit application
+CMD ["streamlit", "run", "src/ant_ai/Get_Started.py"]
