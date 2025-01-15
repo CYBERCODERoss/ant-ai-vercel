@@ -1,97 +1,40 @@
-name: build-deploy-ant-ai-prod
-
-env:
-  IMAGE_NAME: ant-ai
-  CONTAINER_NAME: ant-ai
-  REMOTE_DIR: ~/ant-ai
+name: Deploy via SSH
 
 on:
-  workflow_dispatch:
   push:
-    branches: main
-    paths-ignore:
-      - '*.md'
-      - '.gitignore'
-      - 'docs/'
-      - 'README.md'
+    branches:
+      - main
 
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-22.04
+  deploy:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.AWS_SSH_KEY }}
+        known_hosts: ${{ secrets.AWS_EC2_HOST }}
 
-      - name: Set up environment
-        run: |
-          echo -e "${{ secrets.ENV_PROD }}" >> .env
-          echo "IMAGE_NAME=${{ env.IMAGE_NAME }}" >> .env
-          echo "CONTAINER_NAME=${{ env.CONTAINER_NAME }}" >> .env
-
-      - name: Clean up unused Docker resources
-        run: docker system prune -af
-
-      - name: Build Docker image
-        run: |
-          docker build -t ${{ env.IMAGE_NAME }}:latest .
-
-      - name: Save Docker image
-        run: |
-          docker images
-          docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
-
-      - name: Setup SSH
-        run: |
-          echo "${{ secrets.AWS_SSH_KEY }}" >> id_rsa
-          sudo chmod 400 id_rsa
-
-      - name: Copy files to server
-        run: |
-          ssh -i id_rsa -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} "mkdir -p ${{ env.REMOTE_DIR }}"
-          scp -i id_rsa -o StrictHostKeyChecking=no ${{ env.IMAGE_NAME }}.tar.gz ubuntu@${{ secrets.AWS_EC2_HOST }}:${{ env.REMOTE_DIR }}/
-          scp -i id_rsa -o StrictHostKeyChecking=no docker-compose.yml ubuntu@${{ secrets.AWS_EC2_HOST }}:${{ env.REMOTE_DIR }}/
-          scp -i id_rsa -o StrictHostKeyChecking=no .env ubuntu@${{ secrets.AWS_EC2_HOST }}:${{ env.REMOTE_DIR }}/
-
-      - name: Deploy with rollback
-        run: |
-          ssh -i id_rsa -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} << 'ENDSSH'
-          set -e
-          cd ${{ env.REMOTE_DIR }}
-          
-          # Stop existing containers
-          docker ps -q --filter ancestor=${{ env.IMAGE_NAME }}:latest | xargs -r docker stop
-          docker ps -aq --filter ancestor=${{ env.IMAGE_NAME }}:latest | xargs -r docker rm
-          docker rmi ${{ env.IMAGE_NAME }}:latest || true
-          
-          # Load and deploy new image
-          gunzip -c ${{ env.IMAGE_NAME }}.tar.gz | docker load
-          
-          # Create or update docker-compose.yml with correct image name
-          cat > docker-compose.yml << EOL
-          version: '3'
-          services:
-            ant-ai:
-              image: ${{ env.IMAGE_NAME }}:latest
-              ports:
-                - "8501:8501"
-              restart: always
-          EOL
-          
-          # Deploy with rollback on failure
-          if ! docker compose up -d; then
-            echo "Deployment failed, rolling back..."
+    - name: Check Docker and Docker Compose
+      run: |
+        ssh -o StrictHostKeyChecking=no -i ${{ secrets.AWS_SSH_KEY }} ubuntu@${{ secrets.AWS_EC2_HOST }} '
+          if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
+            echo "Docker or Docker Compose is not installed." >&2
             exit 1
           fi
-          ENDSSH
+        '
 
-      - name: Cleanup
-        if: always()
-        run: |
-          rm -f id_rsa
-          rm -f .env ${{ env.IMAGE_NAME }}.tar.gz
-          docker rmi ${{ env.IMAGE_NAME }}:latest || true
-          docker system prune -f 
+    - name: Clone Repo and Deploy
+      run: |
+        ssh -o StrictHostKeyChecking=no -i ${{ secrets.AWS_SSH_KEY }} ubuntu@${{ secrets.AWS_EC2_HOST }} '
+          REPO_DIR=/home/ubuntu/ant-ai
+          git clone https://github.com/CYBERCODERoss/ant-ai-vercel.git $REPO_DIR || (cd $REPO_DIR && git pull)
+          cd $REPO_DIR
+          echo "${{ secrets.ENV_PROD }}" > .env
+          docker-compose build --no-cache
+          docker-compose up -d
+        '
