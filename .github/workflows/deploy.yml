@@ -1,0 +1,84 @@
+name: build-deploy-ant-ai-prod
+
+env:
+  IMAGE_NAME: ant-ai
+  CONTAINER_NAME: ant-ai
+  REMOTE_DIR: /ant-ai
+
+on:
+  workflow_dispatch:
+  push:
+    branches: main
+    paths-ignore:
+      - '*.md'
+      - '.gitignore'
+      - 'docs/'
+      - 'README.md'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up environment
+        run: |
+          echo -e "${{ secrets.ENV_PROD }}" >> .env
+          echo "IMAGE_NAME=${{ env.IMAGE_NAME }}" >> .env
+          echo "CONTAINER_NAME=${{ env.CONTAINER_NAME }}" >> .env
+
+      - name: Clean up unused Docker resources
+        run: docker system prune -af
+
+      - name: Build Docker image with Docker Compose
+        run: |
+          docker compose build
+
+      - name: Save Docker image
+        run: docker save ${{ env.IMAGE_NAME }} | gzip > ${{ env.IMAGE_NAME }}.tar.gz
+
+      - name: Setup SSH
+        run: |
+          echo "${{ secrets.AWS_SSH_KEY }}" >> id_rsa
+          sudo chmod 400 id_rsa
+
+      - name: Copy files to server
+        run: |
+          ssh -i id_rsa -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} "mkdir -p ${{ env.REMOTE_DIR }}"
+          scp -i id_rsa -o StrictHostKeyChecking=no ${{ env.IMAGE_NAME }}.tar.gz ubuntu@${{ secrets.AWS_EC2_HOST }}:${{ env.REMOTE_DIR }}/
+          scp -i id_rsa -o StrictHostKeyChecking=no docker-compose.yml ubuntu@${{ secrets.AWS_EC2_HOST }}:${{ env.REMOTE_DIR }}/
+          scp -i id_rsa -o StrictHostKeyChecking=no .env ubuntu@${{ secrets.AWS_EC2_HOST }}:${{ env.REMOTE_DIR }}/
+
+      - name: Deploy with rollback
+        run: |
+          ssh -i id_rsa -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_EC2_HOST }} << 'ENDSSH'
+          set -e
+          cd ${{ env.REMOTE_DIR }}
+          
+          # Stop existing containers
+          docker ps -q --filter ancestor=${{ env.IMAGE_NAME }}:latest | xargs -r docker stop
+          docker ps -aq --filter ancestor=${{ env.IMAGE_NAME }}:latest | xargs -r docker rm
+          docker rmi ${{ env.IMAGE_NAME }}:latest || true
+          
+          # Load and deploy new image
+          gunzip -c ${{ env.IMAGE_NAME }}.tar.gz | docker load
+          
+          # Deploy with rollback on failure
+          if ! docker compose up -d; then
+            echo "Deployment failed, rolling back..."
+            exit 1
+          fi
+          ENDSSH
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f id_rsa
+          rm -f .env ${{ env.IMAGE_NAME }}.tar.gz
+          docker rmi ${{ env.IMAGE_NAME }}:latest || true
+          docker system prune -f 
